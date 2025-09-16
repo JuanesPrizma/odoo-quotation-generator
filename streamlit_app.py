@@ -21,7 +21,7 @@ if st.button("Generar Cotización"):
         with st.spinner("Generando la cotización con GPT-5..."):
             file_id = upload_pdf(uploaded_file) if uploaded_file else None
             resp = generate_quotation(description, authors_input, file_id)
-            data = resp.output_parsed.dict()  # Already validated by Pydantic
+            data = resp.output_parsed.model_dump()
 
             data = prepare_data_for_word(data, authors_input)
             output = render_docx(data)
