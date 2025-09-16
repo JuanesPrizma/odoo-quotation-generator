@@ -16,47 +16,11 @@ autores_input = st.text_input(
 )
 descripcion = st.text_area("✍️ Ingresa la descripción del ticket:")
 
+# Solo PDFs
 uploaded_file = st.file_uploader(
-    "📄 Sube un documento (.pdf soportado directamente por OpenAI, .docx y .txt se convertirán automáticamente a .pdf)",
-    type=["pdf", "docx", "txt"],
+    "📄 Sube un documento en formato PDF (único soportado por la API de OpenAI)",
+    type=["pdf"],
 )
-
-
-# === Conversores ===
-def docx_to_pdf(input_path, output_path):
-    """Convierte .docx a .pdf usando pypandoc (requiere pandoc instalado)."""
-    import pypandoc
-
-    try:
-        pypandoc.convert_file(input_path, "pdf", outputfile=output_path)
-        return output_path
-    except OSError:
-        st.error(
-            "❌ Pandoc no está instalado. Asegúrate de incluir `pandoc` en packages.txt para Streamlit Cloud."
-        )
-        raise
-    except RuntimeError as e:
-        st.error(f"❌ Error en la conversión con pandoc: {e}")
-        raise
-
-
-def txt_to_pdf(input_path, output_path):
-    """Convierte .txt a .pdf con reportlab."""
-    from reportlab.lib.pagesizes import letter
-    from reportlab.pdfgen import canvas
-
-    c = canvas.Canvas(output_path, pagesize=letter)
-    with open(input_path, "r", encoding="utf-8") as f:
-        y = 750
-        for line in f:
-            c.drawString(50, y, line.strip())
-            y -= 15
-            if y < 50:
-                c.showPage()
-                y = 750
-    c.save()
-    return output_path
-
 
 # === JSON Schema de salida ===
 COTIZACION_SCHEMA = {
@@ -124,35 +88,19 @@ COTIZACION_SCHEMA = {
 if st.button("Generar Cotización"):
     if not descripcion.strip() and not uploaded_file:
         st.warning(
-            "Por favor escribe una descripción o sube un documento antes de generar la cotización."
+            "Por favor escribe una descripción o sube un documento PDF antes de generar la cotización."
         )
     else:
         with st.spinner("Generando la cotización con IA..."):
 
             file_id = None
             if uploaded_file:
-                with tempfile.NamedTemporaryFile(
-                    delete=False, suffix=f"_{uploaded_file.name}"
-                ) as tmp:
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
                     tmp.write(uploaded_file.read())
                     tmp_path = tmp.name
-
-                if uploaded_file.name.endswith(".docx"):
-                    pdf_path = tmp_path + ".pdf"
-                    upload_path = docx_to_pdf(tmp_path, pdf_path)
-                elif uploaded_file.name.endswith(".txt"):
-                    pdf_path = tmp_path + ".pdf"
-                    upload_path = txt_to_pdf(tmp_path, pdf_path)
-                else:
-                    upload_path = tmp_path  # ya es PDF
-
-                up = client.files.create(
-                    file=open(upload_path, "rb"), purpose="user_data"
-                )
+                up = client.files.create(file=open(tmp_path, "rb"), purpose="user_data")
                 file_id = up.id
                 os.remove(tmp_path)
-                if upload_path != tmp_path:
-                    os.remove(upload_path)
 
             instrucciones = f"""
 Eres un asistente que genera cotizaciones técnicas en JSON.
