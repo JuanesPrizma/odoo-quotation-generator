@@ -6,6 +6,9 @@ import json
 import os
 import re
 
+# Verificar que la versión del SDK sea suficientemente nueva (solo como debug, opcional)
+# st.write("OpenAI SDK version:", openai.__version__)
+
 # Configurar tu API Key en variable de entorno
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
@@ -32,85 +35,70 @@ if st.button("Generar Cotización"):
     else:
         with st.spinner("Generando la cotización con IA..."):
 
-            # Construir instrucciones principales
-            instructions = f"""
-            Eres un asistente que genera cotizaciones técnicas en JSON.
-
-            Descripción manual del ticket:
-            '{descripcion}'
-
-            Los autores de la cotización son: {autores_input}
-
-            Devuelve **únicamente** un JSON válido con esta estructura exacta:
-            {{
-              "nombre_requerimiento": "texto",
-              "numero_oferta": "texto",
-              "fecha_cotizacion": "texto",
-              "autores": ["autor1", "autor2"],
-              "objetivo": "texto",
-              "antecedentes": "texto",
-              "alcance": ["item1", "item2", "item3"],
-              "tiempo_inversion": {{
-                "detalle": [
-                  {{ "actividad": "texto", "horas": int, "tarifa": int, "subtotal": int }}
-                ],
-                "total_horas": int,
-                "total_cop": int
-              }},
-              "tiempo_desarrollo": "texto",
-              "exclusiones": ["item1", "item2"],
-              "condiciones_comerciales": {{
-                "pago": "texto",
-                "garantia": "texto",
-                "metodologia": "texto"
-              }}
-            }}
-            """
-
-            # Construir input para la API
-            input_data = [
-                {
-                    "role": "user",
-                    "content": [{"type": "input_text", "text": instructions}],
-                }
-            ]
-
-            # Subir archivo si existe y adjuntarlo
+            # 1. Subir el archivo si existe
+            file_id = None
             if uploaded_file:
-                with open(uploaded_file.name, "wb") as f:
+                # Guardarlo temporalmente
+                path_temp = f"/tmp/{uploaded_file.name}"
+                with open(path_temp, "wb") as f:
                     f.write(uploaded_file.read())
+                # Crear archivo en OpenAI con propósito 'assistants' o 'user_data' (revisa cuál soporte tu cuenta)
+                file_resp = openai.files.create(
+                    file=open(path_temp, "rb"), purpose="assistants"
+                )
+                file_id = file_resp.id
 
-                uploaded = openai.files.create(
-                    file=open(uploaded_file.name, "rb"), purpose="assistants"
+            # 2. Construir la entrada para responses.create()
+            # Usamos lista de items tipo input para dar flexibilidad
+            input_items = []
+
+            # Siempre incluir el texto de descripción
+            # Podrías querer usar "instructions" aparte si la API lo requiere
+            # Pero aquí lo ponemos como parte de input.
+            desc_text = descripcion.strip() if descripcion.strip() else ""
+            if desc_text:
+                input_items.append(
+                    {"role": "user", "content": [{"type": "text", "text": desc_text}]}
                 )
 
-                input_data.append(
+            # Si hay archivo, lo agregamos como otro item (o dentro del mismo contenido dependiendo de estructura)
+            if file_id:
+                input_items.append(
                     {
                         "role": "user",
                         "content": [
-                            {
-                                "type": "input_text",
-                                "text": "Aquí está el documento adjunto:",
-                            },
-                            {"type": "input_file", "file_id": uploaded.id},
+                            {"type": "text", "text": "Aquí está el documento adjunto:"},
+                            {"type": "file", "file_id": file_id},
                         ],
                     }
                 )
 
-            # Llamada a la API de Responses
+            # 3. Llamada a la API Responses
             response = openai.responses.create(
-                model="gpt-4o-mini",
-                input=input_data,
+                model="gpt-4o-mini",  # asegúrate que ese modelo lo soporta en tu cuenta/región
+                input=input_items,
                 temperature=0.2,
             )
 
-            # Extraer JSON de la salida
-            json_text = response.output_text.strip()
+            # 4. Obtener el JSON desde la salida
+            # En la Responses API, el texto generado normalmente está en
+            # response.output_text o response.output[0].content etc.
+            # Verifica cuál estructura devuelve tu versión
+            try:
+                # algunas versiones lo tienen como output_text
+                json_text = response.output_text.strip()
+            except AttributeError:
+                # otras versiones usan estructura de contenido
+                # puede estar en response.output → lista → contenido
+                # esto es un ejemplo genérico:
+                json_text = response.output[0].content[0].text.strip()
 
+            # Limpiar marques de código si los hay
             if json_text.startswith("```"):
                 json_text = re.sub(r"^```[a-zA-Z]*\n", "", json_text)
                 json_text = re.sub(r"\n```$", "", json_text)
 
+            # Parsear JSON
             try:
                 data = json.loads(json_text)
             except json.JSONDecodeError as e:
@@ -132,7 +120,7 @@ if st.button("Generar Cotización"):
                 if key in data:
                     data[key] = list_to_bullets(data[key])
 
-            # Renderizar docx
+            # 5. Renderizar a Word
             doc = DocxTemplate("plantilla_cotizacion.docx")
             doc.render(data)
 
