@@ -1,27 +1,88 @@
 import streamlit as st
 from docxtpl import DocxTemplate
 import io
-import openai
 import json
 import os
 import re
 import tempfile
+from openai import OpenAI
 
-# Configurar tu API Key en variable de entorno
-openai.api_key = os.getenv("OPENAI_API_KEY")
+client = OpenAI()
 
-st.title("Generador de Cotizaciones con IA")
+st.title("Generador de Cotizaciones con IA (Responses API + PDF)")
 
 autores_input = st.text_input(
     "👥 Ingresa los nombres de los autores (separados por coma):"
 )
 descripcion = st.text_area("✍️ Ingresa la descripción del ticket:")
 
-# Uploader: solo PDF
 uploaded_file = st.file_uploader(
-    "📄 Sube un documento en formato PDF (único soportado por la API de OpenAI)",
+    "📄 Sube un documento en formato PDF (único soportado directamente por la API de OpenAI)",
     type=["pdf"],
 )
+
+# === JSON Schema de salida ===
+COTIZACION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "nombre_requerimiento": {"type": "string"},
+        "numero_oferta": {"type": "string"},
+        "fecha_cotizacion": {"type": "string"},
+        "autores": {"type": "array", "items": {"type": "string"}},
+        "objetivo": {"type": "string"},
+        "antecedentes": {"type": "string"},
+        "alcance": {"type": "array", "items": {"type": "string"}},
+        "tiempo_inversion": {
+            "type": "object",
+            "properties": {
+                "detalle": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "actividad": {"type": "string"},
+                            "horas": {"type": "integer"},
+                            "tarifa": {"type": "integer"},
+                            "subtotal": {"type": "integer"},
+                        },
+                        "required": ["actividad", "horas", "tarifa", "subtotal"],
+                        "additionalProperties": False,
+                    },
+                },
+                "total_horas": {"type": "integer"},
+                "total_cop": {"type": "integer"},
+            },
+            "required": ["detalle", "total_horas", "total_cop"],
+            "additionalProperties": False,
+        },
+        "tiempo_desarrollo": {"type": "string"},
+        "exclusiones": {"type": "array", "items": {"type": "string"}},
+        "condiciones_comerciales": {
+            "type": "object",
+            "properties": {
+                "pago": {"type": "string"},
+                "garantia": {"type": "string"},
+                "metodologia": {"type": "string"},
+            },
+            "required": ["pago", "garantia", "metodologia"],
+            "additionalProperties": False,
+        },
+    },
+    "required": [
+        "nombre_requerimiento",
+        "numero_oferta",
+        "fecha_cotizacion",
+        "autores",
+        "objetivo",
+        "antecedentes",
+        "alcance",
+        "tiempo_inversion",
+        "tiempo_desarrollo",
+        "exclusiones",
+        "condiciones_comerciales",
+    ],
+    "additionalProperties": False,
+}
 
 if st.button("Generar Cotización"):
     if not descripcion.strip() and not uploaded_file:
@@ -31,86 +92,91 @@ if st.button("Generar Cotización"):
     else:
         with st.spinner("Generando la cotización con IA..."):
 
-            # Subir PDF a OpenAI si existe
+            # Subir archivo PDF a OpenAI
             file_id = None
             if uploaded_file:
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
                     tmp.write(uploaded_file.read())
                     tmp_path = tmp.name
-                up = openai.files.create(file=open(tmp_path, "rb"), purpose="user_data")
+                up = client.files.create(file=open(tmp_path, "rb"), purpose="user_data")
                 file_id = up.id
                 os.remove(tmp_path)
 
-            # Prompt mejorado
-            prompt = f"""
-            Eres un asistente experto en elaborar cotizaciones técnicas detalladas y profesionales en formato JSON.
+            # Instrucciones al modelo
+            instrucciones = f"""
+Eres un asistente experto en elaborar cotizaciones técnicas detalladas y profesionales en formato JSON.
 
-            1. Usa la siguiente descripción del ticket:
-            '{descripcion}'
+Usa la descripción manual del ticket y, si está presente, el documento PDF adjunto. 
+Genera textos largos, elaborados y claros en cada campo.
 
-            2. Los autores de la cotización son: {autores_input}
+Autores proporcionados: {autores_input}
 
-            3. {( "También tienes un documento PDF adjunto. Lée su contenido, resume la información más importante y utilízala para enriquecer y extender los textos de la cotización (objetivo, antecedentes, alcance, etc.)." if file_id else "No hay documento adjunto, elabora con base en la descripción dada.")}
+Entrega únicamente un JSON que cumpla exactamente con el esquema indicado.
+"""
 
-            4. Sé explícito y elabora textos completos y detallados, no uses frases cortas. 
-            Por ejemplo:
-            - En "objetivo" redacta un propósito claro y extenso.
-            - En "antecedentes" explica el contexto con más profundidad.
-            - En "alcance" desarrolla cada punto con detalles técnicos y de negocio.
-            - En "condiciones_comerciales" incluye condiciones claras y realistas.
+            # Construcción de input para Responses API
+            input_items = [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": instrucciones},
+                        {
+                            "type": "input_text",
+                            "text": f"Descripción del ticket: {descripcion.strip()}",
+                        },
+                    ],
+                }
+            ]
 
-            Devuelve **únicamente** un JSON válido con esta estructura exacta:
-            {{
-              "nombre_requerimiento": "texto",
-              "numero_oferta": "texto",
-              "fecha_cotizacion": "texto",
-              "autores": ["autor1", "autor2"],
-              "objetivo": "texto elaborado y completo",
-              "antecedentes": "texto elaborado y completo",
-              "alcance": ["detalle elaborado 1", "detalle elaborado 2", "detalle elaborado 3"],
-              "tiempo_inversion": {{
-                "detalle": [
-                  {{ "actividad": "texto", "horas": int, "tarifa": int, "subtotal": int }}
-                ],
-                "total_horas": int,
-                "total_cop": int
-              }},
-              "tiempo_desarrollo": "texto elaborado y completo",
-              "exclusiones": ["detalle elaborado 1", "detalle elaborado 2"],
-              "condiciones_comerciales": {{
-                "pago": "texto elaborado y completo",
-                "garantia": "texto elaborado y completo",
-                "metodologia": "texto elaborado y completo"
-              }}
-            }}
-            """
+            if file_id:
+                input_items.append(
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "input_text",
+                                "text": "Documento adjunto para contexto:",
+                            },
+                            {"type": "input_file", "file_id": file_id},
+                        ],
+                    }
+                )
 
-            # Llamada al modelo
-            response = openai.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.3,  # un poco más de variación para enriquecer textos
+            # Llamada al modelo GPT-5
+            resp = client.responses.create(
+                model="gpt-5",
+                input=input_items,
+                max_output_tokens=2000,
+                text={
+                    "format": {
+                        "type": "json_schema",
+                        "name": "CotizacionTecnica",
+                        "schema": COTIZACION_SCHEMA,
+                        "strict": True,
+                    }
+                },
             )
 
             # Extraer JSON
-            json_text = response.choices[0].message.content.strip()
-
+            json_text = getattr(resp, "output_text", "").strip()
             if json_text.startswith("```"):
                 json_text = re.sub(r"^```[a-zA-Z]*\n", "", json_text)
                 json_text = re.sub(r"\n```$", "", json_text)
 
             try:
                 data = json.loads(json_text)
-            except json.JSONDecodeError as e:
-                st.error(f"❌ JSON inválido: {e}")
+            except json.JSONDecodeError:
+                st.error(
+                    "❌ La respuesta del modelo no es JSON válido. Aquí está la salida recibida:"
+                )
                 st.text(json_text)
                 st.stop()
 
-            # Sobrescribir autores con los ingresados por el usuario
+            # Sobrescribir autores manuales
             autores = [a.strip() for a in autores_input.split(",") if a.strip()]
             data["autores"] = autores
 
-            # Convertir listas a bullet points
+            # Convertir listas a viñetas
             def list_to_bullets(items):
                 if not isinstance(items, list):
                     return items
