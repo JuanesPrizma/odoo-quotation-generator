@@ -4,6 +4,8 @@ import io
 import openai
 import json
 import os
+import re
+
 
 # Configurar tu API Key en variable de entorno
 openai.api_key = os.getenv("OPENAI_API_KEY")
@@ -56,12 +58,18 @@ if st.button("Generar Cotización"):
                 temperature=0.2,
             )
 
-            # Extraer el JSON
-            json_text = response.choices[0].message.content
+            # Extraer el JSON puro del texto
+            json_text = response.choices[0].message.content.strip()
+
+            # Opcional: eliminar ```json ... ```
+            if json_text.startswith("```"):
+                json_text = re.sub(r"^```[a-zA-Z]*\n", "", json_text)  # elimina ```json
+                json_text = re.sub(r"\n```$", "", json_text)          # elimina ```
+
             try:
                 data = json.loads(json_text)
-            except json.JSONDecodeError:
-                st.error("❌ La IA no devolvió un JSON válido. Respuesta cruda:")
+            except json.JSONDecodeError as e:
+                st.error(f"❌ JSON inválido: {e}")
                 st.text(json_text)
                 st.stop()
 
