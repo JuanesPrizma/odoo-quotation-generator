@@ -5,9 +5,8 @@ import json
 import os
 import re
 import tempfile
-
-# Nuevo cliente OpenAI (SDK v1.x+)
 from openai import OpenAI
+from docx2pdf import convert  # 👈 librería para convertir .docx → .pdf
 
 client = OpenAI()  # Usa OPENAI_API_KEY del entorno
 
@@ -21,9 +20,10 @@ autores_input = st.text_input(
 # Campo de descripción manual
 descripcion = st.text_area("✍️ Ingresa la descripción del ticket:")
 
-# Cargar archivo (opcional)
+# Entrada de archivo (especificamos formatos soportados)
 uploaded_file = st.file_uploader(
-    "📄 Sube un documento (.pdf, .docx, .txt)", type=["pdf", "docx", "txt"]
+    "📄 Sube un documento (.pdf — soportado por OpenAI, .docx/.txt serán convertidos a PDF automáticamente)",
+    type=["pdf", "docx", "txt"],
 )
 
 # Esquema de salida forzada (Structured Outputs)
@@ -97,22 +97,49 @@ if st.button("Generar Cotización"):
     else:
         with st.spinner("Generando la cotización con IA..."):
 
-            # 1. Subir archivo a la API si existe
+            # 1. Subir archivo a OpenAI en formato PDF
             file_id = None
             if uploaded_file:
-                with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                with tempfile.NamedTemporaryFile(
+                    delete=False, suffix=f"_{uploaded_file.name}"
+                ) as tmp:
                     tmp.write(uploaded_file.read())
                     tmp_path = tmp.name
-                try:
-                    up = client.files.create(
-                        file=open(tmp_path, "rb"),
-                        purpose="user_data",  # en algunas cuentas puede ser 'assistants'
-                    )
-                    file_id = up.id
-                finally:
-                    os.remove(tmp_path)
 
-            # 2. Construir entradas para la API
+                # Si es docx → convertir a PDF
+                if uploaded_file.name.endswith(".docx"):
+                    pdf_path = tmp_path.replace(".docx", ".pdf")
+                    convert(tmp_path, pdf_path)
+                    upload_path = pdf_path
+                # Si es txt → convertir a PDF simple
+                elif uploaded_file.name.endswith(".txt"):
+                    pdf_path = tmp_path.replace(".txt", ".pdf")
+                    from reportlab.lib.pagesizes import letter
+                    from reportlab.pdfgen import canvas
+
+                    c = canvas.Canvas(pdf_path, pagesize=letter)
+                    with open(tmp_path, "r", encoding="utf-8") as f:
+                        y = 750
+                        for line in f:
+                            c.drawString(50, y, line.strip())
+                            y -= 15
+                            if y < 50:
+                                c.showPage()
+                                y = 750
+                    c.save()
+                    upload_path = pdf_path
+                else:
+                    upload_path = tmp_path  # ya es PDF
+
+                up = client.files.create(
+                    file=open(upload_path, "rb"), purpose="user_data"
+                )
+                file_id = up.id
+                os.remove(tmp_path)
+                if upload_path != tmp_path:
+                    os.remove(upload_path)
+
+            # 2. Instrucciones para el modelo
             instrucciones = f"""
 Eres un asistente que genera cotizaciones técnicas en JSON.
 Usa la descripción manual y, si hay, el documento adjunto.
@@ -149,7 +176,7 @@ Entrega únicamente un JSON que cumpla exactamente el esquema indicado.
                     }
                 )
 
-            # 3. Llamada a la API Responses con gpt-5
+            # 3. Llamar al modelo gpt-5 con Structured Outputs
             try:
                 resp = client.responses.create(
                     model="gpt-5",
@@ -193,11 +220,11 @@ Entrega únicamente un JSON que cumpla exactamente el esquema indicado.
                 st.text(json_text)
                 st.stop()
 
-            # 5. Sobrescribir autores con lo ingresado por el usuario
+            # Sobrescribir autores con lo ingresado por el usuario
             autores = [a.strip() for a in autores_input.split(",") if a.strip()]
             data["autores"] = autores
 
-            # 6. Convertir listas a viñetas
+            # Convertir listas a viñetas
             def list_to_bullets(items):
                 if not isinstance(items, list):
                     return items
@@ -207,7 +234,7 @@ Entrega únicamente un JSON que cumpla exactamente el esquema indicado.
                 if key in data:
                     data[key] = list_to_bullets(data[key])
 
-            # 7. Renderizar la plantilla Word
+            # Renderizar la plantilla Word
             try:
                 doc = DocxTemplate("plantilla_cotizacion.docx")
                 doc.render(data)
@@ -226,11 +253,3 @@ Entrega únicamente un JSON que cumpla exactamente el esquema indicado.
                 file_name="cotizacion.docx",
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             )
-
-# Debug opcional: versión del SDK
-try:
-    import openai as _openai_module
-
-    st.caption(f"SDK OpenAI versión: v{_openai_module.__version__}")
-except Exception:
-    pass
