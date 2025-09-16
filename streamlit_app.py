@@ -74,7 +74,7 @@ if st.button("Generar Cotización"):
                 st.stop()
 
             # Generar el documento Word con docxtpl
-            doc = DocxTemplate("plantilla.docx")
+            doc = DocxTemplate("plantilla_cotizacion.docx")
             doc.render(data)
 
             output = io.BytesIO()
