@@ -6,7 +6,7 @@ import os
 import re
 import tempfile
 
-# Nuevo cliente del SDK v1.x
+# Nuevo cliente OpenAI (SDK v1.x+)
 from openai import OpenAI
 
 client = OpenAI()  # Usa OPENAI_API_KEY del entorno
@@ -18,15 +18,15 @@ autores_input = st.text_input(
     "👥 Ingresa los nombres de los autores (separados por coma):"
 )
 
-# Campo de descripción manual (se mantiene)
+# Campo de descripción manual
 descripcion = st.text_area("✍️ Ingresa la descripción del ticket:")
 
-# Cargar archivo (opcional). Puedes anexar .pdf/.docx/.txt sin convertir a texto
+# Cargar archivo (opcional)
 uploaded_file = st.file_uploader(
     "📄 Sube un documento (.pdf, .docx, .txt)", type=["pdf", "docx", "txt"]
 )
 
-# Esquema para asegurar JSON válido (Structured Outputs)
+# Esquema de salida forzada (Structured Outputs)
 COTIZACION_SCHEMA = {
     "type": "object",
     "properties": {
@@ -96,41 +96,33 @@ if st.button("Generar Cotización"):
         )
     else:
         with st.spinner("Generando la cotización con IA..."):
-            # 1) Subir archivo (si existe) a Files API SIN convertir a texto
+
+            # 1. Subir archivo a la API si existe
             file_id = None
             if uploaded_file:
-                # Guardar temporalmente para subir
                 with tempfile.NamedTemporaryFile(delete=False) as tmp:
                     tmp.write(uploaded_file.read())
                     tmp_path = tmp.name
                 try:
-                    # 'user_data' es el propósito recomendado hoy para entradas de usuario reutilizables
-                    # (si tu cuenta aún usa 'assistants', puedes cambiarlo)
                     up = client.files.create(
-                        file=open(tmp_path, "rb"), purpose="user_data"
+                        file=open(tmp_path, "rb"),
+                        purpose="user_data",  # en algunas cuentas puede ser 'assistants'
                     )
                     file_id = up.id
                 finally:
-                    try:
-                        os.remove(tmp_path)
-                    except Exception:
-                        pass
+                    os.remove(tmp_path)
 
-            # 2) Instrucciones + entradas del usuario (texto y archivo adjunto)
+            # 2. Construir entradas para la API
             instrucciones = f"""
-Eres un asistente que genera cotizaciones técnicas en JSON. 
+Eres un asistente que genera cotizaciones técnicas en JSON.
 Usa la descripción manual y, si hay, el documento adjunto.
 
 Autores proporcionados: {autores_input}
 
-Entrega únicamente un JSON que cumpla exactamente el esquema indicado por el sistema.
-Evita texto adicional fuera del JSON.
+Entrega únicamente un JSON que cumpla exactamente el esquema indicado.
 """
 
-            # Construimos la lista de "input items" para Responses API
-            input_items = []
-            # Siempre enviamos las instrucciones
-            input_items.append(
+            input_items = [
                 {
                     "role": "user",
                     "content": [
@@ -141,8 +133,8 @@ Evita texto adicional fuera del JSON.
                         },
                     ],
                 }
-            )
-            # Adjuntamos el archivo (si existe)
+            ]
+
             if file_id:
                 input_items.append(
                     {
@@ -157,14 +149,11 @@ Evita texto adicional fuera del JSON.
                     }
                 )
 
-            # 3) Llamar al modelo gpt-5 con Structured Outputs para forzar JSON válido
-            # Nota: 'text': { 'format': {'type': 'json_schema', 'schema': ... , 'strict': True}}
-            # está documentado para Responses API.
+            # 3. Llamada a la API Responses con gpt-5
             try:
                 resp = client.responses.create(
                     model="gpt-5",
                     input=input_items,
-                    temperature=0.2,
                     max_output_tokens=2000,
                     text={
                         "format": {
@@ -179,19 +168,13 @@ Evita texto adicional fuera del JSON.
                 st.error(f"❌ Error al llamar a la API de OpenAI: {e}")
                 st.stop()
 
-            # 4) Extraer el JSON
-            # En Responses API normalmente está en resp.output_text
+            # 4. Extraer el JSON
             json_text = ""
             if hasattr(resp, "output_text") and resp.output_text:
                 json_text = resp.output_text.strip()
-            else:
-                # Fallback por si cambia la estructura
+            elif hasattr(resp, "output") and resp.output:
                 try:
-                    # Busca el primer bloque de texto
-                    if hasattr(resp, "output") and resp.output:
-                        first = resp.output[0]
-                        # algunos SDKs exponen .content[0].text
-                        json_text = getattr(first.content[0], "text", "").strip()
+                    json_text = resp.output[0].content[0].text.strip()
                 except Exception:
                     pass
 
@@ -199,12 +182,10 @@ Evita texto adicional fuera del JSON.
                 st.error("No se pudo extraer texto de la respuesta del modelo.")
                 st.stop()
 
-            # Quitar fences de código si vinieran
             if json_text.startswith("```"):
                 json_text = re.sub(r"^```[a-zA-Z]*\n", "", json_text)
                 json_text = re.sub(r"\n```$", "", json_text)
 
-            # 5) Parsear JSON y post-procesar
             try:
                 data = json.loads(json_text)
             except json.JSONDecodeError as e:
@@ -212,11 +193,11 @@ Evita texto adicional fuera del JSON.
                 st.text(json_text)
                 st.stop()
 
-            # Sobrescribir autores explícitamente con los ingresados por el usuario
+            # 5. Sobrescribir autores con lo ingresado por el usuario
             autores = [a.strip() for a in autores_input.split(",") if a.strip()]
             data["autores"] = autores
 
-            # Convertir listas a bullets para la plantilla Word
+            # 6. Convertir listas a viñetas
             def list_to_bullets(items):
                 if not isinstance(items, list):
                     return items
@@ -226,7 +207,7 @@ Evita texto adicional fuera del JSON.
                 if key in data:
                     data[key] = list_to_bullets(data[key])
 
-            # 6) Renderizar .docx con docxtpl
+            # 7. Renderizar la plantilla Word
             try:
                 doc = DocxTemplate("plantilla_cotizacion.docx")
                 doc.render(data)
@@ -246,10 +227,10 @@ Evita texto adicional fuera del JSON.
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             )
 
-# Info útil de depuración (opcional): versión del SDK
+# Debug opcional: versión del SDK
 try:
     import openai as _openai_module
 
-    st.caption(f"SDK OpenAI: v{_openai_module.__version__}")
+    st.caption(f"SDK OpenAI versión: v{_openai_module.__version__}")
 except Exception:
     pass
