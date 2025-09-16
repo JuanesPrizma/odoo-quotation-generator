@@ -9,7 +9,7 @@ from openai import OpenAI
 
 client = OpenAI()
 
-st.title("Generador de Cotizaciones con IA (Responses API + PDF)")
+st.title("Generador de Cotizaciones con IA")
 
 autores_input = st.text_input(
     "👥 Ingresa los nombres de los autores (separados por coma):"
@@ -157,8 +157,31 @@ Entrega únicamente un JSON que cumpla exactamente con el esquema indicado.
                 },
             )
 
-            # Extraer JSON
-            json_text = getattr(resp, "output_text", "").strip()
+            # === Extracción robusta del JSON ===
+            json_text = None
+
+            # 1. Intentar con output_text
+            if getattr(resp, "output_text", None):
+                json_text = resp.output_text.strip()
+
+            # 2. Si no, recorrer los bloques de output
+            if not json_text and getattr(resp, "output", None):
+                chunks = []
+                for block in resp.output:
+                    if hasattr(block, "content"):
+                        for c in block.content:
+                            if getattr(c, "type", None) == "output_text" and getattr(
+                                c, "text", None
+                            ):
+                                chunks.append(c.text)
+                if chunks:
+                    json_text = "".join(chunks).strip()
+
+            if not json_text:
+                st.error("❌ El modelo no devolvió ningún JSON.")
+                st.stop()
+
+            # Limpiar bordes de ```
             if json_text.startswith("```"):
                 json_text = re.sub(r"^```[a-zA-Z]*\n", "", json_text)
                 json_text = re.sub(r"\n```$", "", json_text)
@@ -167,7 +190,7 @@ Entrega únicamente un JSON que cumpla exactamente con el esquema indicado.
                 data = json.loads(json_text)
             except json.JSONDecodeError:
                 st.error(
-                    "❌ La respuesta del modelo no es JSON válido. Aquí está la salida recibida:"
+                    "❌ La salida no es JSON válido. Aquí está lo que devolvió el modelo:"
                 )
                 st.text(json_text)
                 st.stop()
