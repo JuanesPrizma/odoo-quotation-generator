@@ -1,34 +1,29 @@
 import streamlit as st
-from services.openai_service import (
-    upload_pdf,
-    generate_quotation,
-    extract_json,
-    get_openai_metadata,
-)
+from services.openai_service import upload_pdf, generate_quotation, get_openai_metadata
 from services.word_service import prepare_data_for_word, render_docx
-import json
 
 st.title("Generador de Cotizaciones con IA")
 
-autores_input = st.text_input(
+authors_input = st.text_input(
     "👥 Ingresa los nombres de los autores (separados por coma):"
 )
-descripcion = st.text_area("✍️ Ingresa la descripción del ticket:")
+description = st.text_area("✍️ Ingresa la descripción del ticket:")
 uploaded_file = st.file_uploader(
     "📄 Sube un PDF (único formato soportado)", type=["pdf"]
 )
 
 if st.button("Generar Cotización"):
-    if not descripcion.strip() and not uploaded_file:
+    if not description.strip() and not uploaded_file:
         st.warning(
             "Por favor escribe una descripción o sube un PDF antes de generar la cotización."
         )
     else:
-        with st.spinner("Generando la cotización..."):
+        with st.spinner("Generando la cotización con GPT-5..."):
             file_id = upload_pdf(uploaded_file) if uploaded_file else None
-            resp, payload = generate_quotation(descripcion, autores_input, file_id)
-            data = extract_json(resp)
-            data = prepare_data_for_word(data, autores_input)
+            resp = generate_quotation(description, authors_input, file_id)
+            data = resp.output_parsed.dict()  # Already validated by Pydantic
+
+            data = prepare_data_for_word(data, authors_input)
             output = render_docx(data)
 
             st.success("✅ Cotización generada con éxito")
@@ -39,17 +34,13 @@ if st.button("Generar Cotización"):
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             )
 
-            # Mostrar cuerpo de la petición
-            with st.expander("📦 Ver cuerpo de la petición enviada a OpenAI"):
-                st.json(payload)
-
-# Pie de página
+# Footer
 meta = get_openai_metadata()
 st.markdown(
     f"""
     <hr>
     <small>
-    ⚙️ Modelo: <b>{meta['modelo']}</b> <br>
+    ⚙️ Model: <b>{meta['model']}</b><br>
     📦 OpenAI SDK: <b>{meta['sdk_version']}</b>
     </small>
     """,
