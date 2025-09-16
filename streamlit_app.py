@@ -16,7 +16,7 @@ autores_input = st.text_input(
 )
 descripcion = st.text_area("✍️ Ingresa la descripción del ticket:")
 
-# Solo PDFs
+# Solo PDFs soportados
 uploaded_file = st.file_uploader(
     "📄 Sube un documento en formato PDF (único soportado por la API de OpenAI)",
     type=["pdf"],
@@ -93,6 +93,7 @@ if st.button("Generar Cotización"):
     else:
         with st.spinner("Generando la cotización con IA..."):
 
+            # Subir archivo PDF a OpenAI
             file_id = None
             if uploaded_file:
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
@@ -151,12 +152,35 @@ Entrega únicamente un JSON que cumpla exactamente el esquema indicado.
                 },
             )
 
-            json_text = getattr(resp, "output_text", "").strip()
+            # === Extracción robusta del JSON ===
+            json_text = None
+            if hasattr(resp, "output_text") and resp.output_text:
+                json_text = resp.output_text.strip()
+            elif hasattr(resp, "output") and resp.output:
+                try:
+                    json_text = resp.output[0].content[0].text.strip()
+                except Exception:
+                    pass
+
+            if not json_text:
+                st.error("❌ No se pudo extraer salida del modelo.")
+                st.stop()
+
+            # Limpiar bordes de ``` si vienen
             if json_text.startswith("```"):
                 json_text = re.sub(r"^```[a-zA-Z]*\n", "", json_text)
                 json_text = re.sub(r"\n```$", "", json_text)
 
-            data = json.loads(json_text)
+            try:
+                data = json.loads(json_text)
+            except json.JSONDecodeError:
+                st.error(
+                    "❌ La respuesta del modelo no es JSON válido. Aquí está la salida recibida:"
+                )
+                st.text(json_text)
+                st.stop()
+
+            # Sobrescribir autores
             autores = [a.strip() for a in autores_input.split(",") if a.strip()]
             data["autores"] = autores
 
