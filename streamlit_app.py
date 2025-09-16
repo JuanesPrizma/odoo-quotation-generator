@@ -11,31 +11,25 @@ client = OpenAI()
 
 st.title("Generador de Cotizaciones con IA (gpt-5)")
 
-autores_input = st.text_input(
-    "👥 Ingresa los nombres de los autores (separados por coma):"
-)
+autores_input = st.text_input("👥 Ingresa los nombres de los autores (separados por coma):")
 descripcion = st.text_area("✍️ Ingresa la descripción del ticket:")
 
 uploaded_file = st.file_uploader(
     "📄 Sube un documento (.pdf soportado directamente por OpenAI, .docx y .txt se convertirán automáticamente a .pdf)",
-    type=["pdf", "docx", "txt"],
+    type=["pdf", "docx", "txt"]
 )
-
 
 # === Conversores ===
 def docx_to_pdf(input_path, output_path):
     """Convierte .docx a .pdf usando pypandoc (requiere pandoc instalado)."""
     import pypandoc
-
     pypandoc.convert_file(input_path, "pdf", outputfile=output_path)
     return output_path
-
 
 def txt_to_pdf(input_path, output_path):
     """Convierte .txt a .pdf con reportlab."""
     from reportlab.lib.pagesizes import letter
     from reportlab.pdfgen import canvas
-
     c = canvas.Canvas(output_path, pagesize=letter)
     with open(input_path, "r", encoding="utf-8") as f:
         y = 750
@@ -47,7 +41,6 @@ def txt_to_pdf(input_path, output_path):
                 y = 750
     c.save()
     return output_path
-
 
 # === JSON Schema de salida ===
 COTIZACION_SCHEMA = {
@@ -71,17 +64,17 @@ COTIZACION_SCHEMA = {
                             "actividad": {"type": "string"},
                             "horas": {"type": "integer"},
                             "tarifa": {"type": "integer"},
-                            "subtotal": {"type": "integer"},
+                            "subtotal": {"type": "integer"}
                         },
                         "required": ["actividad", "horas", "tarifa", "subtotal"],
-                        "additionalProperties": False,
-                    },
+                        "additionalProperties": False
+                    }
                 },
                 "total_horas": {"type": "integer"},
-                "total_cop": {"type": "integer"},
+                "total_cop": {"type": "integer"}
             },
             "required": ["detalle", "total_horas", "total_cop"],
-            "additionalProperties": False,
+            "additionalProperties": False
         },
         "tiempo_desarrollo": {"type": "string"},
         "exclusiones": {"type": "array", "items": {"type": "string"}},
@@ -90,41 +83,30 @@ COTIZACION_SCHEMA = {
             "properties": {
                 "pago": {"type": "string"},
                 "garantia": {"type": "string"},
-                "metodologia": {"type": "string"},
+                "metodologia": {"type": "string"}
             },
             "required": ["pago", "garantia", "metodologia"],
-            "additionalProperties": False,
-        },
+            "additionalProperties": False
+        }
     },
     "required": [
-        "nombre_requerimiento",
-        "numero_oferta",
-        "fecha_cotizacion",
-        "autores",
-        "objetivo",
-        "antecedentes",
-        "alcance",
-        "tiempo_inversion",
-        "tiempo_desarrollo",
-        "exclusiones",
-        "condiciones_comerciales",
+        "nombre_requerimiento", "numero_oferta", "fecha_cotizacion",
+        "autores", "objetivo", "antecedentes", "alcance",
+        "tiempo_inversion", "tiempo_desarrollo", "exclusiones",
+        "condiciones_comerciales"
     ],
-    "additionalProperties": False,
+    "additionalProperties": False
 }
 
 if st.button("Generar Cotización"):
     if not descripcion.strip() and not uploaded_file:
-        st.warning(
-            "Por favor escribe una descripción o sube un documento antes de generar la cotización."
-        )
+        st.warning("Por favor escribe una descripción o sube un documento antes de generar la cotización.")
     else:
         with st.spinner("Generando la cotización con IA..."):
 
             file_id = None
             if uploaded_file:
-                with tempfile.NamedTemporaryFile(
-                    delete=False, suffix=f"_{uploaded_file.name}"
-                ) as tmp:
+                with tempfile.NamedTemporaryFile(delete=False, suffix=f"_{uploaded_file.name}") as tmp:
                     tmp.write(uploaded_file.read())
                     tmp_path = tmp.name
 
@@ -137,9 +119,7 @@ if st.button("Generar Cotización"):
                 else:
                     upload_path = tmp_path  # ya es PDF
 
-                up = client.files.create(
-                    file=open(upload_path, "rb"), purpose="user_data"
-                )
+                up = client.files.create(file=open(upload_path, "rb"), purpose="user_data")
                 file_id = up.id
                 os.remove(tmp_path)
                 if upload_path != tmp_path:
@@ -155,30 +135,19 @@ Entrega únicamente un JSON que cumpla exactamente el esquema indicado.
 """
 
             input_items = [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "input_text", "text": instrucciones},
-                        {
-                            "type": "input_text",
-                            "text": f"Descripción del ticket: {descripcion.strip()}",
-                        },
-                    ],
-                }
+                {"role": "user", "content": [
+                    {"type": "input_text", "text": instrucciones},
+                    {"type": "input_text", "text": f"Descripción del ticket: {descripcion.strip()}"}
+                ]}
             ]
             if file_id:
-                input_items.append(
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "input_text",
-                                "text": "Documento adjunto para contexto:",
-                            },
-                            {"type": "input_file", "file_id": file_id},
-                        ],
-                    }
-                )
+                input_items.append({
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": "Documento adjunto para contexto:"},
+                        {"type": "input_file", "file_id": file_id}
+                    ]
+                })
 
             resp = client.responses.create(
                 model="gpt-5",
@@ -189,9 +158,9 @@ Entrega únicamente un JSON que cumpla exactamente el esquema indicado.
                         "type": "json_schema",
                         "name": "CotizacionTecnica",
                         "schema": COTIZACION_SCHEMA,
-                        "strict": True,
+                        "strict": True
                     }
-                },
+                }
             )
 
             json_text = getattr(resp, "output_text", "").strip()
@@ -204,8 +173,7 @@ Entrega únicamente un JSON que cumpla exactamente el esquema indicado.
             data["autores"] = autores
 
             def list_to_bullets(items):
-                if not isinstance(items, list):
-                    return items
+                if not isinstance(items, list): return items
                 return "\n".join([f"• {item}" for item in items])
 
             for key in ["alcance", "exclusiones"]:
