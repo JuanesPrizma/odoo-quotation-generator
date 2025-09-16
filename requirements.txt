@@ -1,3 +1,5 @@
 streamlit
 docxtpl
 openai
+pypandoc
+reportlab
