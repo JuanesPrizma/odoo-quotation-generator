@@ -11,35 +11,35 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 
 st.title("Generador de Cotizaciones con IA")
 
+# Entrada de autores
 autores_input = st.text_input(
     "👥 Ingresa los nombres de los autores (separados por coma):"
 )
 
-# Cargar archivo
+# Campo de descripción manual
+descripcion = st.text_area("✍️ Ingresa la descripción del ticket:")
+
+# Cargar archivo (opcional)
 uploaded_file = st.file_uploader(
     "📄 Sube un documento (.docx, .txt, .pdf)", type=["docx", "txt", "pdf"]
 )
 
 if st.button("Generar Cotización"):
-    if not uploaded_file:
-        st.warning("Por favor sube un documento antes de generar la cotización.")
+    if not descripcion.strip() and not uploaded_file:
+        st.warning(
+            "Por favor escribe una descripción o sube un documento antes de generar la cotización."
+        )
     else:
         with st.spinner("Generando la cotización con IA..."):
 
-            # Guardar archivo temporalmente
-            with open(uploaded_file.name, "wb") as f:
-                f.write(uploaded_file.read())
+            messages = []
 
-            # Subir archivo a OpenAI
-            uploaded = openai.files.create(
-                file=open(uploaded_file.name, "rb"), purpose="assistants"
-            )
-
-            # Prompt para la IA
-            instructions = f"""
+            # Prompt principal
+            prompt = f"""
             Eres un asistente que genera cotizaciones técnicas en JSON.
 
-            El documento adjunto contiene la información del ticket.
+            Descripción manual del ticket:
+            '{descripcion}'
 
             Los autores de la cotización son: {autores_input}
 
@@ -69,23 +69,39 @@ if st.button("Generar Cotización"):
             }}
             """
 
-            # Enviar archivo + instrucciones a la API
-            response = openai.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "user", "content": instructions},
+            messages.append({"role": "user", "content": prompt})
+
+            # Subir archivo si lo hay
+            if uploaded_file:
+                with open(uploaded_file.name, "wb") as f:
+                    f.write(uploaded_file.read())
+
+                uploaded = openai.files.create(
+                    file=open(uploaded_file.name, "rb"), purpose="assistants"
+                )
+
+                # Adjuntar archivo al mensaje
+                messages.append(
                     {
                         "role": "user",
                         "content": [
-                            {"type": "input_text", "text": "Aquí está el archivo:"},
+                            {
+                                "type": "input_text",
+                                "text": "Aquí está el documento adjunto:",
+                            },
                             {"type": "input_file", "file_id": uploaded.id},
                         ],
-                    },
-                ],
+                    }
+                )
+
+            # Llamada a la API
+            response = openai.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=messages,
                 temperature=0.2,
             )
 
-            # Extraer JSON de la respuesta
+            # Extraer JSON
             json_text = response.choices[0].message.content.strip()
 
             if json_text.startswith("```"):
@@ -99,11 +115,11 @@ if st.button("Generar Cotización"):
                 st.text(json_text)
                 st.stop()
 
-            # Sobrescribir autores
+            # Sobrescribir autores con los ingresados
             autores = [a.strip() for a in autores_input.split(",") if a.strip()]
             data["autores"] = autores
 
-            # Convertir listas a bullets para Word
+            # Convertir listas a bullets
             def list_to_bullets(items):
                 if not isinstance(items, list):
                     return items
@@ -113,6 +129,7 @@ if st.button("Generar Cotización"):
                 if key in data:
                     data[key] = list_to_bullets(data[key])
 
+            # Renderizar docx
             doc = DocxTemplate("plantilla_cotizacion.docx")
             doc.render(data)
 
