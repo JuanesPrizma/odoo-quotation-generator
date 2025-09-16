@@ -1,7 +1,7 @@
 import tempfile, os, json, re
 import streamlit as st
 from openai import OpenAI, __version__ as openai_version
-from schemas.cotizacion_schema import COTIZACION_SCHEMA
+from schemas.quotation_schema import QUOTATION_SCHEMA
 
 client = OpenAI()
 MODEL_NAME = "gpt-5"
@@ -69,7 +69,7 @@ Entrega únicamente un JSON que cumpla exactamente con el esquema indicado.
             "format": {
                 "type": "json_schema",
                 "name": "CotizacionTecnica",
-                "schema": COTIZACION_SCHEMA,
+                "schema": QUOTATION_SCHEMA,
                 "strict": True,
             }
         },
