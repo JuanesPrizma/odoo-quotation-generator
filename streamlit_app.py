@@ -9,7 +9,7 @@ from openai import OpenAI
 
 client = OpenAI()
 
-st.title("Generador de Cotizaciones con IA (Responses API + PDF)")
+st.title("Generador de Cotizaciones con IA (GPT-5 + Responses API)")
 
 autores_input = st.text_input(
     "👥 Ingresa los nombres de los autores (separados por coma):"
@@ -21,7 +21,7 @@ uploaded_file = st.file_uploader(
     type=["pdf"],
 )
 
-# === JSON Schema de salida ===
+# === JSON Schema esperado ===
 COTIZACION_SCHEMA = {
     "type": "object",
     "properties": {
@@ -86,9 +86,9 @@ if st.button("Generar Cotización"):
             "Por favor escribe una descripción o sube un documento PDF antes de generar la cotización."
         )
     else:
-        with st.spinner("Generando la cotización con IA..."):
+        with st.spinner("Generando la cotización con GPT-5..."):
 
-            # Subir archivo PDF a OpenAI
+            # Subir PDF a OpenAI si existe
             file_id = None
             if uploaded_file:
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
@@ -140,6 +140,7 @@ Entrega únicamente un JSON que cumpla exactamente con el esquema indicado.
                     }
                 )
 
+            # Llamada a GPT-5 con Responses API
             resp = client.responses.create(
                 model="gpt-5",
                 input=input_items,
@@ -189,25 +190,26 @@ Entrega únicamente un JSON que cumpla exactamente con el esquema indicado.
                 st.text(json_text)
                 st.stop()
 
-            # Normalizar campos que no deben ser None
+            # Normalizar campos para evitar None
             defaults = {"alcance": [], "exclusiones": [], "autores": []}
             for key, default_value in defaults.items():
                 if key not in data or data[key] is None:
                     data[key] = default_value
 
-            # Sobrescribir autores ingresados
+            # Sobrescribir autores con los ingresados manualmente
             autores = [a.strip() for a in autores_input.split(",") if a.strip()]
             data["autores"] = autores
 
             def list_to_bullets(items):
                 if not isinstance(items, list):
-                    return items or ""  # si viene None, devolver string vacío
+                    return items or ""
                 return "\n".join([f"• {item}" for item in items])
 
             for key in ["alcance", "exclusiones"]:
                 if key in data:
                     data[key] = list_to_bullets(data[key])
 
+            # Renderizar la plantilla Word
             doc = DocxTemplate("plantilla_cotizacion.docx")
             doc.render(data)
 
