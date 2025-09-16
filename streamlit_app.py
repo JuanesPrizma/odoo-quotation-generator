@@ -9,7 +9,7 @@ from openai import OpenAI
 
 client = OpenAI()
 
-st.title("Generador de Cotizaciones con IA")
+st.title("Generador de Cotizaciones con IA (Responses API + PDF)")
 
 autores_input = st.text_input(
     "👥 Ingresa los nombres de los autores (separados por coma):"
@@ -46,14 +46,12 @@ COTIZACION_SCHEMA = {
                             "subtotal": {"type": "integer"},
                         },
                         "required": ["actividad", "horas", "tarifa", "subtotal"],
-                        "additionalProperties": False,
                     },
                 },
                 "total_horas": {"type": "integer"},
                 "total_cop": {"type": "integer"},
             },
             "required": ["detalle", "total_horas", "total_cop"],
-            "additionalProperties": False,
         },
         "tiempo_desarrollo": {"type": "string"},
         "exclusiones": {"type": "array", "items": {"type": "string"}},
@@ -65,7 +63,6 @@ COTIZACION_SCHEMA = {
                 "metodologia": {"type": "string"},
             },
             "required": ["pago", "garantia", "metodologia"],
-            "additionalProperties": False,
         },
     },
     "required": [
@@ -81,7 +78,6 @@ COTIZACION_SCHEMA = {
         "exclusiones",
         "condiciones_comerciales",
     ],
-    "additionalProperties": False,
 }
 
 if st.button("Generar Cotización"):
@@ -102,7 +98,6 @@ if st.button("Generar Cotización"):
                 file_id = up.id
                 os.remove(tmp_path)
 
-            # Instrucciones al modelo
             instrucciones = f"""
 Eres un asistente experto en elaborar cotizaciones técnicas detalladas y profesionales en formato JSON.
 
@@ -111,10 +106,13 @@ Genera textos largos, elaborados y claros en cada campo.
 
 Autores proporcionados: {autores_input}
 
+⚠️ Importante: si algún campo no aplica o no hay información suficiente,
+devuelve un string vacío "" o una lista vacía [].
+Nunca devuelvas null.
+
 Entrega únicamente un JSON que cumpla exactamente con el esquema indicado.
 """
 
-            # Construcción de input para Responses API
             input_items = [
                 {
                     "role": "user",
@@ -142,7 +140,6 @@ Entrega únicamente un JSON que cumpla exactamente con el esquema indicado.
                     }
                 )
 
-            # Llamada al modelo GPT-5
             resp = client.responses.create(
                 model="gpt-5",
                 input=input_items,
@@ -160,11 +157,9 @@ Entrega únicamente un JSON que cumpla exactamente con el esquema indicado.
             # === Extracción robusta del JSON ===
             json_text = None
 
-            # 1. Intentar con output_text
             if getattr(resp, "output_text", None):
                 json_text = resp.output_text.strip()
 
-            # 2. Si no, recorrer los bloques de output
             if not json_text and getattr(resp, "output", None):
                 chunks = []
                 for block in resp.output:
@@ -181,7 +176,6 @@ Entrega únicamente un JSON que cumpla exactamente con el esquema indicado.
                 st.error("❌ El modelo no devolvió ningún JSON.")
                 st.stop()
 
-            # Limpiar bordes de ```
             if json_text.startswith("```"):
                 json_text = re.sub(r"^```[a-zA-Z]*\n", "", json_text)
                 json_text = re.sub(r"\n```$", "", json_text)
@@ -195,21 +189,25 @@ Entrega únicamente un JSON que cumpla exactamente con el esquema indicado.
                 st.text(json_text)
                 st.stop()
 
-            # Sobrescribir autores manuales
+            # Normalizar campos que no deben ser None
+            defaults = {"alcance": [], "exclusiones": [], "autores": []}
+            for key, default_value in defaults.items():
+                if key not in data or data[key] is None:
+                    data[key] = default_value
+
+            # Sobrescribir autores ingresados
             autores = [a.strip() for a in autores_input.split(",") if a.strip()]
             data["autores"] = autores
 
-            # Convertir listas a viñetas
             def list_to_bullets(items):
                 if not isinstance(items, list):
-                    return items
+                    return items or ""  # si viene None, devolver string vacío
                 return "\n".join([f"• {item}" for item in items])
 
             for key in ["alcance", "exclusiones"]:
                 if key in data:
                     data[key] = list_to_bullets(data[key])
 
-            # Generar Word
             doc = DocxTemplate("plantilla_cotizacion.docx")
             doc.render(data)
 
