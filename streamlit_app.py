@@ -50,33 +50,33 @@ if st.button("Generar Cotización"):
             }}
             """
 
-            response = openai.ChatCompletion.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.2,
-            )
+      response = openai.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.2,
+      )
 
-            # Extraer el JSON
-            json_text = response.choices[0].message["content"]
-            try:
-                data = json.loads(json_text)
-            except json.JSONDecodeError:
-                st.error("❌ La IA no devolvió un JSON válido. Respuesta cruda:")
-                st.text(json_text)
-                st.stop()
+      # Extraer el JSON
+      json_text = response.choices[0].message.content
+      try:
+        data = json.loads(json_text)
+      except json.JSONDecodeError:
+        st.error("❌ La IA no devolvió un JSON válido. Respuesta cruda:")
+        st.text(json_text)
+        st.stop()
 
-        # Generar el documento Word con docxtpl
-        doc = DocxTemplate("plantilla.docx")
-        doc.render(data)
+      # Generar el documento Word con docxtpl
+      doc = DocxTemplate("plantilla.docx")
+      doc.render(data)
 
-        output = io.BytesIO()
-        doc.save(output)
-        output.seek(0)
+      output = io.BytesIO()
+      doc.save(output)
+      output.seek(0)
 
-        st.success("✅ Cotización generada con éxito")
-        st.download_button(
-            label="📥 Descargar Cotización",
-            data=output,
-            file_name="cotizacion.docx",
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        )
+      st.success("✅ Cotización generada con éxito")
+      st.download_button(
+        label="📥 Descargar Cotización",
+        data=output,
+        file_name="cotizacion.docx",
+        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      )
