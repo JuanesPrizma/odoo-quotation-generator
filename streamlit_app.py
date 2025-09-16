@@ -41,15 +41,23 @@ if st.button("Generar Cotización"):
                 file_id = up.id
                 os.remove(tmp_path)
 
-            # Construir prompt
+            # Prompt mejorado
             prompt = f"""
-            Eres un asistente que genera cotizaciones técnicas en JSON.
-            A partir de la siguiente descripción del ticket:
+            Eres un asistente experto en elaborar cotizaciones técnicas detalladas y profesionales en formato JSON.
 
+            1. Usa la siguiente descripción del ticket:
             '{descripcion}'
 
-            Los autores de la cotización son: {autores_input}
-            {( "Además, utiliza el documento adjunto en PDF como contexto adicional." if file_id else "" )}
+            2. Los autores de la cotización son: {autores_input}
+
+            3. {( "También tienes un documento PDF adjunto. Lée su contenido, resume la información más importante y utilízala para enriquecer y extender los textos de la cotización (objetivo, antecedentes, alcance, etc.)." if file_id else "No hay documento adjunto, elabora con base en la descripción dada.")}
+
+            4. Sé explícito y elabora textos completos y detallados, no uses frases cortas. 
+            Por ejemplo:
+            - En "objetivo" redacta un propósito claro y extenso.
+            - En "antecedentes" explica el contexto con más profundidad.
+            - En "alcance" desarrolla cada punto con detalles técnicos y de negocio.
+            - En "condiciones_comerciales" incluye condiciones claras y realistas.
 
             Devuelve **únicamente** un JSON válido con esta estructura exacta:
             {{
@@ -57,9 +65,9 @@ if st.button("Generar Cotización"):
               "numero_oferta": "texto",
               "fecha_cotizacion": "texto",
               "autores": ["autor1", "autor2"],
-              "objetivo": "texto",
-              "antecedentes": "texto",
-              "alcance": ["item1", "item2", "item3"],
+              "objetivo": "texto elaborado y completo",
+              "antecedentes": "texto elaborado y completo",
+              "alcance": ["detalle elaborado 1", "detalle elaborado 2", "detalle elaborado 3"],
               "tiempo_inversion": {{
                 "detalle": [
                   {{ "actividad": "texto", "horas": int, "tarifa": int, "subtotal": int }}
@@ -67,12 +75,12 @@ if st.button("Generar Cotización"):
                 "total_horas": int,
                 "total_cop": int
               }},
-              "tiempo_desarrollo": "texto",
-              "exclusiones": ["item1", "item2"],
+              "tiempo_desarrollo": "texto elaborado y completo",
+              "exclusiones": ["detalle elaborado 1", "detalle elaborado 2"],
               "condiciones_comerciales": {{
-                "pago": "texto",
-                "garantia": "texto",
-                "metodologia": "texto"
+                "pago": "texto elaborado y completo",
+                "garantia": "texto elaborado y completo",
+                "metodologia": "texto elaborado y completo"
               }}
             }}
             """
@@ -81,7 +89,7 @@ if st.button("Generar Cotización"):
             response = openai.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.2,
+                temperature=0.3,  # un poco más de variación para enriquecer textos
             )
 
             # Extraer JSON
