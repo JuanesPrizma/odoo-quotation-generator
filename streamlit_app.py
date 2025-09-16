@@ -32,10 +32,8 @@ if st.button("Generar Cotización"):
     else:
         with st.spinner("Generando la cotización con IA..."):
 
-            messages = []
-
-            # Prompt principal
-            prompt = f"""
+            # Construir instrucciones principales
+            instructions = f"""
             Eres un asistente que genera cotizaciones técnicas en JSON.
 
             Descripción manual del ticket:
@@ -69,9 +67,15 @@ if st.button("Generar Cotización"):
             }}
             """
 
-            messages.append({"role": "user", "content": prompt})
+            # Construir input para la API
+            input_data = [
+                {
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": instructions}],
+                }
+            ]
 
-            # Subir archivo si lo hay
+            # Subir archivo si existe y adjuntarlo
             if uploaded_file:
                 with open(uploaded_file.name, "wb") as f:
                     f.write(uploaded_file.read())
@@ -80,8 +84,7 @@ if st.button("Generar Cotización"):
                     file=open(uploaded_file.name, "rb"), purpose="assistants"
                 )
 
-                # Adjuntar archivo al mensaje
-                messages.append(
+                input_data.append(
                     {
                         "role": "user",
                         "content": [
@@ -94,15 +97,15 @@ if st.button("Generar Cotización"):
                     }
                 )
 
-            # Llamada a la API
-            response = openai.chat.completions.create(
+            # Llamada a la API de Responses
+            response = openai.responses.create(
                 model="gpt-4o-mini",
-                messages=messages,
+                input=input_data,
                 temperature=0.2,
             )
 
-            # Extraer JSON
-            json_text = response.choices[0].message.content.strip()
+            # Extraer JSON de la salida
+            json_text = response.output_text.strip()
 
             if json_text.startswith("```"):
                 json_text = re.sub(r"^```[a-zA-Z]*\n", "", json_text)
