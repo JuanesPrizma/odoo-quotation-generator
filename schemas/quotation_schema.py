@@ -22,12 +22,14 @@ QUOTATION_SCHEMA = {
                             "subtotal": {"type": "integer"},
                         },
                         "required": ["actividad", "horas", "tarifa", "subtotal"],
+                        "additionalProperties": False,
                     },
                 },
                 "total_horas": {"type": "integer"},
                 "total_cop": {"type": "integer"},
             },
             "required": ["detalle", "total_horas", "total_cop"],
+            "additionalProperties": False,
         },
         "tiempo_desarrollo": {"type": "string"},
         "exclusiones": {"type": "array", "items": {"type": "string"}},
@@ -39,6 +41,7 @@ QUOTATION_SCHEMA = {
                 "metodologia": {"type": "string"},
             },
             "required": ["pago", "garantia", "metodologia"],
+            "additionalProperties": False,
         },
     },
     "required": [
@@ -54,4 +57,5 @@ QUOTATION_SCHEMA = {
         "exclusiones",
         "condiciones_comerciales",
     ],
+    "additionalProperties": False,
 }
