@@ -1,31 +1,93 @@
 import streamlit as st
 from docxtpl import DocxTemplate
 import io
-import openai
 import json
 import os
 import re
+import tempfile
 
-# Verificar que la versión del SDK sea suficientemente nueva (solo como debug, opcional)
-# st.write("OpenAI SDK version:", openai.__version__)
+# Nuevo cliente del SDK v1.x
+from openai import OpenAI
 
-# Configurar tu API Key en variable de entorno
-openai.api_key = os.getenv("OPENAI_API_KEY")
+client = OpenAI()  # Usa OPENAI_API_KEY del entorno
 
-st.title("Generador de Cotizaciones con IA")
+st.title("Generador de Cotizaciones con IA (gpt-5)")
 
 # Entrada de autores
 autores_input = st.text_input(
     "👥 Ingresa los nombres de los autores (separados por coma):"
 )
 
-# Campo de descripción manual
+# Campo de descripción manual (se mantiene)
 descripcion = st.text_area("✍️ Ingresa la descripción del ticket:")
 
-# Cargar archivo (opcional)
+# Cargar archivo (opcional). Puedes anexar .pdf/.docx/.txt sin convertir a texto
 uploaded_file = st.file_uploader(
-    "📄 Sube un documento (.docx, .txt, .pdf)", type=["docx", "txt", "pdf"]
+    "📄 Sube un documento (.pdf, .docx, .txt)", type=["pdf", "docx", "txt"]
 )
+
+# Esquema para asegurar JSON válido (Structured Outputs)
+COTIZACION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "nombre_requerimiento": {"type": "string"},
+        "numero_oferta": {"type": "string"},
+        "fecha_cotizacion": {"type": "string"},
+        "autores": {"type": "array", "items": {"type": "string"}},
+        "objetivo": {"type": "string"},
+        "antecedentes": {"type": "string"},
+        "alcance": {"type": "array", "items": {"type": "string"}},
+        "tiempo_inversion": {
+            "type": "object",
+            "properties": {
+                "detalle": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "actividad": {"type": "string"},
+                            "horas": {"type": "integer"},
+                            "tarifa": {"type": "integer"},
+                            "subtotal": {"type": "integer"},
+                        },
+                        "required": ["actividad", "horas", "tarifa", "subtotal"],
+                        "additionalProperties": False,
+                    },
+                },
+                "total_horas": {"type": "integer"},
+                "total_cop": {"type": "integer"},
+            },
+            "required": ["detalle", "total_horas", "total_cop"],
+            "additionalProperties": False,
+        },
+        "tiempo_desarrollo": {"type": "string"},
+        "exclusiones": {"type": "array", "items": {"type": "string"}},
+        "condiciones_comerciales": {
+            "type": "object",
+            "properties": {
+                "pago": {"type": "string"},
+                "garantia": {"type": "string"},
+                "metodologia": {"type": "string"},
+            },
+            "required": ["pago", "garantia", "metodologia"],
+            "additionalProperties": False,
+        },
+    },
+    "required": [
+        "nombre_requerimiento",
+        "numero_oferta",
+        "fecha_cotizacion",
+        "autores",
+        "objetivo",
+        "antecedentes",
+        "alcance",
+        "tiempo_inversion",
+        "tiempo_desarrollo",
+        "exclusiones",
+        "condiciones_comerciales",
+    ],
+    "additionalProperties": False,
+}
 
 if st.button("Generar Cotización"):
     if not descripcion.strip() and not uploaded_file:
@@ -34,71 +96,115 @@ if st.button("Generar Cotización"):
         )
     else:
         with st.spinner("Generando la cotización con IA..."):
-
-            # 1. Subir el archivo si existe
+            # 1) Subir archivo (si existe) a Files API SIN convertir a texto
             file_id = None
             if uploaded_file:
-                # Guardarlo temporalmente
-                path_temp = f"/tmp/{uploaded_file.name}"
-                with open(path_temp, "wb") as f:
-                    f.write(uploaded_file.read())
-                # Crear archivo en OpenAI con propósito 'assistants' o 'user_data' (revisa cuál soporte tu cuenta)
-                file_resp = openai.files.create(
-                    file=open(path_temp, "rb"), purpose="assistants"
-                )
-                file_id = file_resp.id
+                # Guardar temporalmente para subir
+                with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                    tmp.write(uploaded_file.read())
+                    tmp_path = tmp.name
+                try:
+                    # 'user_data' es el propósito recomendado hoy para entradas de usuario reutilizables
+                    # (si tu cuenta aún usa 'assistants', puedes cambiarlo)
+                    up = client.files.create(
+                        file=open(tmp_path, "rb"), purpose="user_data"
+                    )
+                    file_id = up.id
+                finally:
+                    try:
+                        os.remove(tmp_path)
+                    except Exception:
+                        pass
 
-            # 2. Construir la entrada para responses.create()
-            # Usamos lista de items tipo input para dar flexibilidad
+            # 2) Instrucciones + entradas del usuario (texto y archivo adjunto)
+            instrucciones = f"""
+Eres un asistente que genera cotizaciones técnicas en JSON. 
+Usa la descripción manual y, si hay, el documento adjunto.
+
+Autores proporcionados: {autores_input}
+
+Entrega únicamente un JSON que cumpla exactamente el esquema indicado por el sistema.
+Evita texto adicional fuera del JSON.
+"""
+
+            # Construimos la lista de "input items" para Responses API
             input_items = []
-
-            # Siempre incluir el texto de descripción
-            # Podrías querer usar "instructions" aparte si la API lo requiere
-            # Pero aquí lo ponemos como parte de input.
-            desc_text = descripcion.strip() if descripcion.strip() else ""
-            if desc_text:
-                input_items.append(
-                    {"role": "user", "content": [{"type": "text", "text": desc_text}]}
-                )
-
-            # Si hay archivo, lo agregamos como otro item (o dentro del mismo contenido dependiendo de estructura)
+            # Siempre enviamos las instrucciones
+            input_items.append(
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": instrucciones},
+                        {
+                            "type": "input_text",
+                            "text": f"Descripción del ticket: {descripcion.strip()}",
+                        },
+                    ],
+                }
+            )
+            # Adjuntamos el archivo (si existe)
             if file_id:
                 input_items.append(
                     {
                         "role": "user",
                         "content": [
-                            {"type": "text", "text": "Aquí está el documento adjunto:"},
-                            {"type": "file", "file_id": file_id},
+                            {
+                                "type": "input_text",
+                                "text": "Documento adjunto para contexto:",
+                            },
+                            {"type": "input_file", "file_id": file_id},
                         ],
                     }
                 )
 
-            # 3. Llamada a la API Responses
-            response = openai.responses.create(
-                model="gpt-4o-mini",  # asegúrate que ese modelo lo soporta en tu cuenta/región
-                input=input_items,
-                temperature=0.2,
-            )
-
-            # 4. Obtener el JSON desde la salida
-            # En la Responses API, el texto generado normalmente está en
-            # response.output_text o response.output[0].content etc.
-            # Verifica cuál estructura devuelve tu versión
+            # 3) Llamar al modelo gpt-5 con Structured Outputs para forzar JSON válido
+            # Nota: 'text': { 'format': {'type': 'json_schema', 'schema': ... , 'strict': True}}
+            # está documentado para Responses API.
             try:
-                # algunas versiones lo tienen como output_text
-                json_text = response.output_text.strip()
-            except AttributeError:
-                # otras versiones usan estructura de contenido
-                # puede estar en response.output → lista → contenido
-                # esto es un ejemplo genérico:
-                json_text = response.output[0].content[0].text.strip()
+                resp = client.responses.create(
+                    model="gpt-5",
+                    input=input_items,
+                    temperature=0.2,
+                    max_output_tokens=2000,
+                    text={
+                        "format": {
+                            "type": "json_schema",
+                            "name": "CotizacionTecnica",
+                            "schema": COTIZACION_SCHEMA,
+                            "strict": True,
+                        }
+                    },
+                )
+            except Exception as e:
+                st.error(f"❌ Error al llamar a la API de OpenAI: {e}")
+                st.stop()
 
-            # Limpiar marques de código si los hay
+            # 4) Extraer el JSON
+            # En Responses API normalmente está en resp.output_text
+            json_text = ""
+            if hasattr(resp, "output_text") and resp.output_text:
+                json_text = resp.output_text.strip()
+            else:
+                # Fallback por si cambia la estructura
+                try:
+                    # Busca el primer bloque de texto
+                    if hasattr(resp, "output") and resp.output:
+                        first = resp.output[0]
+                        # algunos SDKs exponen .content[0].text
+                        json_text = getattr(first.content[0], "text", "").strip()
+                except Exception:
+                    pass
+
+            if not json_text:
+                st.error("No se pudo extraer texto de la respuesta del modelo.")
+                st.stop()
+
+            # Quitar fences de código si vinieran
             if json_text.startswith("```"):
                 json_text = re.sub(r"^```[a-zA-Z]*\n", "", json_text)
                 json_text = re.sub(r"\n```$", "", json_text)
 
-            # Parsear JSON
+            # 5) Parsear JSON y post-procesar
             try:
                 data = json.loads(json_text)
             except json.JSONDecodeError as e:
@@ -106,11 +212,11 @@ if st.button("Generar Cotización"):
                 st.text(json_text)
                 st.stop()
 
-            # Sobrescribir autores con los ingresados
+            # Sobrescribir autores explícitamente con los ingresados por el usuario
             autores = [a.strip() for a in autores_input.split(",") if a.strip()]
             data["autores"] = autores
 
-            # Convertir listas a bullets
+            # Convertir listas a bullets para la plantilla Word
             def list_to_bullets(items):
                 if not isinstance(items, list):
                     return items
@@ -120,9 +226,13 @@ if st.button("Generar Cotización"):
                 if key in data:
                     data[key] = list_to_bullets(data[key])
 
-            # 5. Renderizar a Word
-            doc = DocxTemplate("plantilla_cotizacion.docx")
-            doc.render(data)
+            # 6) Renderizar .docx con docxtpl
+            try:
+                doc = DocxTemplate("plantilla_cotizacion.docx")
+                doc.render(data)
+            except Exception as e:
+                st.error(f"❌ Error al renderizar la plantilla Word: {e}")
+                st.stop()
 
             output = io.BytesIO()
             doc.save(output)
@@ -135,3 +245,11 @@ if st.button("Generar Cotización"):
                 file_name="cotizacion.docx",
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             )
+
+# Info útil de depuración (opcional): versión del SDK
+try:
+    import openai as _openai_module
+
+    st.caption(f"SDK OpenAI: v{_openai_module.__version__}")
+except Exception:
+    pass
