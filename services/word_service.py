@@ -11,7 +11,7 @@ def prepare_data_for_word(data: dict, authors_input: str):
 
     # Override authors manually
     authors = [a.strip() for a in authors_input.split(",") if a.strip()]
-    data["autores"] = authors
+    data["autores"] = ", ".join(authors) if authors else "N/A"
 
     # Convert lists to bullet points
     def list_to_bullets(items):
